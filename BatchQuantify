@@ -1,7 +1,6 @@
 //BATCH_QUANTIFY
-//Batch quantify takes a folder containing Bio-formats compatible Zeiss confocal images as an input.
-//It thresholds images on channel t1 and quantifies fluorescent intensity in channel q.
-//Use the setup section to set quantification parameters
+//Batch quantify takes a folder containing Bio-formats compatible Zeiss confocal images (.czi) as an input.
+//
 //Version 3.0 30/04/2018
 //By Máté Nászai
 
