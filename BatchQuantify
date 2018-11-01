@@ -1,0 +1,205 @@
+//BATCH_QUANTIFY
+//Batch quantify takes a folder containing Bio-formats compatible Zeiss confocal images as an input.
+//It thresholds images on channel t1 and quantifies fluorescent intensity in channel q.
+//Use the setup section to set quantification parameters
+//Version 3.0 30/04/2018
+//By Máté Nászai
+
+//%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+//SETUP
+//Threshold channel 1t to serve as a mask for the channel you quantify.
+//Quanitfy channel q.
+// Channel 0 = green
+// Channel 1 = blue
+// Channel 2 = red
+t1=0; //Threshold and use as mask
+q=2; //Quantify intensity in this channel
+//Mask threshold modifier
+mask_threshold_modifier=2.5;
+//Layer masks?
+layer=0; //Do you want to only quantify the crossection of two masks Boolean 1=yes, 0=no.
+t2=0; //Which channel to threshold and overlap with the channel t1
+crosssection=0; //Do you want the cross section of layers (1) or subtract one from the other (0)?
+mask_threshold_modifier2=2.5;
+//Normalize with background
+norm=0; //Do you wish to normalize by staining intensity by background? Boolean 1=yes, 0=no.
+bg_channel=0; //Which channel to threshold and quantify intensity in to be used as background (probably esg).
+background_threshold_modifier=2.5; //Number set empirically
+//TEST MODE
+test=0; //Activate test mode? Works with a single example image in a folder. Boolean 1=yes, 0=no.
+//END OF SETUP
+//%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+//SCRIPT
+run("Close All");
+run("Clear Results");
+
+setBatchMode(true);
+//Test mode switch
+if (test){
+setBatchMode(false);
+}
+
+//Get directory
+dir=getDirectory("Choose Source");
+list=getFileList(dir);
+
+for (i=0; i<list.length; i++){
+
+//Open file
+run("Bio-Formats Importer", "open=" + dir + list[i] + " color_mode=Default rois_import=[ROI manager] split_channels view=Hyperstack stack_order=XYCZT");
+selectWindow(list[i] + " - C=" + t1);
+run("Duplicate...", "duplicate");
+
+//Get threshold and number of slices
+setAutoThreshold("Triangle dark stack");
+getThreshold(lower,upper);
+
+threshold=round(mask_threshold_modifier*lower);
+print(list[i] + " Threshold:" + threshold);
+	
+//Threshold image conventionally
+setThreshold(threshold, 65535);
+setOption("BlackBackground", true);
+run("Convert to Mask", "method=Triangle background=Dark black");
+rename("Mask");
+run("Options...", "iterations=1 count=1 black do=Nothing");
+run("Fill Holes", "stack");
+run("Despeckle", "stack");
+run("Despeckle", "stack");
+run("Despeckle", "stack");
+
+if(layer){
+
+	selectWindow(list[i] + " - C=" + t2);
+	run("Duplicate...", "duplicate");
+	
+	//Get threshold and number of slices
+	setAutoThreshold("Triangle dark stack");
+	getThreshold(lower,upper);
+	
+	threshold=round(mask_threshold_modifier2*lower);
+		
+	//Threshold image conventionally
+	setThreshold(threshold, 65535);
+	setOption("BlackBackground", true);
+	run("Convert to Mask", "method=Triangle background=Dark black");
+	rename("Mask2");
+	run("Options...", "iterations=1 count=1 black do=Nothing");
+	run("Fill Holes", "stack");
+	run("Despeckle", "stack");
+	run("Despeckle", "stack");
+	run("Despeckle", "stack");
+	if(!crosssection){
+	run("Invert", "stack");
+	}
+	imageCalculator("AND create stack", "Mask","Mask2");
+	close("Mask");
+	selectWindow("Result of Mask");
+	rename("Mask");
+}
+
+
+
+//Get masked stacks
+selectWindow("Mask");
+run("Invert", "stack");
+imageCalculator("Transparent-zero create stack", list[i] + " - C=" + q,"Mask");
+rename("temp");
+imageCalculator("Subtract create stack", "temp","Mask");
+rename("Cytoplasm");
+close("temp");
+
+//Perform measurements
+run("Set Measurements...", "integrated redirect=None decimal=3");
+selectWindow("Cytoplasm");
+a=0;
+temp=0;
+for (n=1; n<=nSlices; n++){
+	setSlice(n);
+	run("Measure");
+	temp+=getResult("RawIntDen",a);
+	a++;
+}
+cytoplasm=temp;
+print(list[i] + " Cytoplasm IntDens:",cytoplasm);
+
+selectWindow("Mask");
+run("Invert", "stack");
+temp=0;
+for (n=1; n<=nSlices; n++){
+	setSlice(n);
+	run("Measure");
+	temp+=getResult("RawIntDen",a);
+	a++;
+}
+cytoplasm_voxel=temp/255;
+print(list[i] + " Cytoplasm VoxelNum:",cytoplasm_voxel);
+
+cytoplasm_mean=cytoplasm/cytoplasm_voxel;
+print(list[i] + " Cytoplasm mean:",cytoplasm_mean);
+
+//Background intensity for normalization
+if (norm){
+	selectWindow(list[i] + " - C=" + bg_channel);
+	run("Duplicate...", "duplicate");
+	rename("Background_mask");
+	setAutoThreshold("Triangle dark stack");
+	getThreshold(lower,upper); 
+	threshold=round(background_threshold_modifier*lower);
+	//Threshold image conventionally
+	setThreshold(threshold, 65535);
+	setOption("BlackBackground", true);
+	run("Convert to Mask", "method=Triangle background=Dark black");
+	run("Despeckle", "stack");
+	run("Despeckle", "stack");
+	run("Despeckle", "stack");
+	run("Fill Holes", "stack");
+	
+	//Get masked stacks
+	selectWindow("Background_mask");
+	run("Invert", "stack");
+	imageCalculator("Transparent-zero create stack", list[i] + " - C=" + q,"Background_mask");
+	imageCalculator("Subtract create stack", "Result of " + list[i] + " - C=" + q,"Background_mask");
+	rename("Background");
+	
+	temp=0;
+	for (n=1; n<=nSlices; n++){
+		setSlice(n);
+		run("Measure");
+		temp+=getResult("RawIntDen",a);
+		a++;
+	}
+	background=temp;
+	print(list[i] + " Background IntDens:",background);
+	
+	selectWindow("Background_mask");
+	run("Invert", "stack");
+	
+	temp=0;
+	for (n=1; n<=nSlices; n++){
+		setSlice(n);
+		run("Measure");
+		temp+=getResult("RawIntDen",a);
+		a++;
+	}
+	
+	background_voxel=temp/255;
+	print(list[i] + " Background VoxelNum:",background_voxel);
+	
+	background_mean=background/background_voxel;
+	print(list[i] + " Background mean:",background_mean);
+	ratio=cytoplasm_mean/background_mean;
+	print(list[i] + " Intensity ratio:",ratio);
+
+}
+
+//Test mode switch
+if (!test){
+run("Close All");
+run("Clear Results");
+}
+
+}
+
+setBatchMode(false);
